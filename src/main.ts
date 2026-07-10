@@ -1,5 +1,8 @@
 import "./style.css";
 import { Game } from "./game/Game";
+import { installDirectionalGravity } from "./game/directionalGravity";
+
+installDirectionalGravity(Game);
 
 const canvas = document.getElementById("game-canvas");
 
