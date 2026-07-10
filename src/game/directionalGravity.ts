@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { Game } from "./Game";
 import type { GridVector } from "./levels";
 
+type MoveAction = "move-up" | "move-down" | "move-left" | "move-right";
 type TiltAction = "tilt-up" | "tilt-down" | "tilt-left" | "tilt-right";
 
 type RotationAnimationRuntime = {
@@ -10,6 +11,7 @@ type RotationAnimationRuntime = {
 
 type GameRuntime = {
   camera: THREE.PerspectiveCamera;
+  stageRoot: THREE.Group;
   gravity: GridVector;
   rotationAnimation: RotationAnimationRuntime | null;
   pendingScreenGravity?: GridVector | null;
@@ -18,10 +20,16 @@ type GameRuntime = {
 type GamePrototypeRuntime = {
   tiltStage(this: Game, action: TiltAction): void;
   getLocalGravity(this: Game): GridVector;
+  getScreenMovementDirection(this: Game, action: MoveAction): GridVector;
 };
 
 type GameConstructor = {
   prototype: Game;
+};
+
+type ScreenAxes = {
+  right: THREE.Vector3;
+  up: THREE.Vector3;
 };
 
 const patchedClasses = new WeakSet<object>();
@@ -38,32 +46,70 @@ const CARDINAL_DIRECTIONS: readonly GridVector[] = [
 const vectorsEqual = (left: GridVector, right: GridVector): boolean =>
   left.x === right.x && left.y === right.y && left.z === right.z;
 
+const dotGridVectors = (left: GridVector, right: GridVector): number =>
+  left.x * right.x + left.y * right.y + left.z * right.z;
+
 const cloneGridVector = ({ x, y, z }: GridVector): GridVector => ({ x, y, z });
+
+const negateGridVector = ({ x, y, z }: GridVector): GridVector => ({
+  x: -x,
+  y: -y,
+  z: -z,
+});
+
+const toWorldDirection = (
+  direction: GridVector,
+  stageQuaternion: THREE.Quaternion,
+): THREE.Vector3 =>
+  new THREE.Vector3(direction.x, direction.y, direction.z)
+    .applyQuaternion(stageQuaternion)
+    .normalize();
+
+const getScreenAxes = (camera: THREE.PerspectiveCamera): ScreenAxes => {
+  const cameraQuaternion = new THREE.Quaternion();
+  camera.getWorldQuaternion(cameraQuaternion);
+
+  return {
+    right: new THREE.Vector3(1, 0, 0).applyQuaternion(cameraQuaternion).normalize(),
+    up: new THREE.Vector3(0, 1, 0).applyQuaternion(cameraQuaternion).normalize(),
+  };
+};
 
 const getDesiredWorldDirection = (
   action: TiltAction,
   camera: THREE.PerspectiveCamera,
 ): THREE.Vector3 => {
-  const cameraQuaternion = new THREE.Quaternion();
-  camera.getWorldQuaternion(cameraQuaternion);
-
-  const screenRight = new THREE.Vector3(1, 0, 0)
-    .applyQuaternion(cameraQuaternion)
-    .normalize();
-  const screenUp = new THREE.Vector3(0, 1, 0)
-    .applyQuaternion(cameraQuaternion)
-    .normalize();
+  const screenAxes = getScreenAxes(camera);
 
   switch (action) {
     case "tilt-left":
-      return screenRight.negate();
+      return screenAxes.right.negate();
     case "tilt-right":
-      return screenRight;
+      return screenAxes.right;
     case "tilt-up":
-      return screenUp;
+      return screenAxes.up;
     case "tilt-down":
-      return screenUp.negate();
+      return screenAxes.up.negate();
   }
+};
+
+const findBestAlignedDirection = (
+  candidates: readonly GridVector[],
+  desiredWorldDirection: THREE.Vector3,
+  stageQuaternion: THREE.Quaternion,
+): GridVector | null => {
+  let bestDirection: GridVector | null = null;
+  let bestAlignment = Number.NEGATIVE_INFINITY;
+
+  candidates.forEach((candidate) => {
+    const alignment = toWorldDirection(candidate, stageQuaternion).dot(desiredWorldDirection);
+    if (alignment > bestAlignment) {
+      bestAlignment = alignment;
+      bestDirection = candidate;
+    }
+  });
+
+  return bestDirection === null ? null : cloneGridVector(bestDirection);
 };
 
 const resolveScreenDirectionalGravity = (
@@ -72,44 +118,73 @@ const resolveScreenDirectionalGravity = (
   targetStageQuaternion: THREE.Quaternion,
   currentGravity: GridVector,
 ): GridVector => {
-  const desiredWorldDirection = getDesiredWorldDirection(action, camera);
-  let bestDirection: GridVector | null = null;
-  let bestAlignment = Number.NEGATIVE_INFINITY;
-
-  CARDINAL_DIRECTIONS.forEach((candidate) => {
-    if (vectorsEqual(candidate, currentGravity)) {
-      return;
-    }
-
-    const candidateWorldDirection = new THREE.Vector3(
-      candidate.x,
-      candidate.y,
-      candidate.z,
-    )
-      .applyQuaternion(targetStageQuaternion)
-      .normalize();
-    const alignment = candidateWorldDirection.dot(desiredWorldDirection);
-
-    if (alignment > bestAlignment) {
-      bestAlignment = alignment;
-      bestDirection = candidate;
-    }
-  });
-
-  return cloneGridVector(
-    bestDirection ?? {
-      x: -currentGravity.x,
-      y: -currentGravity.y,
-      z: -currentGravity.z,
-    },
+  const candidates = CARDINAL_DIRECTIONS.filter(
+    (candidate) => !vectorsEqual(candidate, currentGravity),
   );
+  const resolved = findBestAlignedDirection(
+    candidates,
+    getDesiredWorldDirection(action, camera),
+    targetStageQuaternion,
+  );
+
+  return resolved ?? negateGridVector(currentGravity);
 };
 
 /**
- * Keeps each SHIFT arrow visually truthful: after the chamber turns, gravity
- * snaps to the chamber axis that projects closest to the pressed screen
- * direction. A left shift therefore makes the robot travel left on screen
- * instead of always dropping vertically in world space.
+ * Builds two independent movement axes on the surface the robot is currently
+ * standing on. Horizontal input follows the camera's screen-right vector,
+ * while vertical input uses the remaining tangent axis that best follows
+ * screen-up. Keeping those axes independent prevents wall movement from
+ * collapsing into left/right-only controls.
+ */
+const resolveSurfaceMovementDirection = (
+  action: MoveAction,
+  camera: THREE.PerspectiveCamera,
+  stageQuaternion: THREE.Quaternion,
+  gravity: GridVector,
+): GridVector => {
+  const tangentDirections = CARDINAL_DIRECTIONS.filter(
+    (candidate) => dotGridVectors(candidate, gravity) === 0,
+  );
+  const screenAxes = getScreenAxes(camera);
+
+  const screenRightDirection = findBestAlignedDirection(
+    tangentDirections,
+    screenAxes.right,
+    stageQuaternion,
+  );
+
+  if (screenRightDirection === null) {
+    return { x: 1, y: 0, z: 0 };
+  }
+
+  const verticalCandidates = tangentDirections.filter(
+    (candidate) => dotGridVectors(candidate, screenRightDirection) === 0,
+  );
+  const screenUpDirection = findBestAlignedDirection(
+    verticalCandidates,
+    screenAxes.up,
+    stageQuaternion,
+  );
+
+  const resolvedUp = screenUpDirection ?? verticalCandidates[0] ?? screenRightDirection;
+
+  switch (action) {
+    case "move-right":
+      return cloneGridVector(screenRightDirection);
+    case "move-left":
+      return negateGridVector(screenRightDirection);
+    case "move-up":
+      return cloneGridVector(resolvedUp);
+    case "move-down":
+      return negateGridVector(resolvedUp);
+  }
+};
+
+/**
+ * Keeps each SHIFT arrow visually truthful and keeps MOVE controls usable on
+ * every chamber face. Gravity follows the pressed screen direction, and the
+ * movement pad is rebuilt from the two axes tangent to the current surface.
  */
 export const installDirectionalGravity = (GameClass: GameConstructor): void => {
   if (patchedClasses.has(GameClass)) {
@@ -148,5 +223,17 @@ export const installDirectionalGravity = (GameClass: GameConstructor): void => {
     }
 
     return originalGetLocalGravity.call(this);
+  };
+
+  prototype.getScreenMovementDirection = function surfaceRelativeMovement(
+    action: MoveAction,
+  ): GridVector {
+    const runtime = this as unknown as GameRuntime;
+    return resolveSurfaceMovementDirection(
+      action,
+      runtime.camera,
+      runtime.stageRoot.quaternion,
+      runtime.gravity,
+    );
   };
 };
