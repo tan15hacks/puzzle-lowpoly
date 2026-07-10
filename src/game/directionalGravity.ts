@@ -317,13 +317,12 @@ const resolveSurfaceMovementDirection = (
  * axis reads horizontally and the other reads vertically on the actual screen.
  */
 export const installDirectionalGravity = (GameClass: GameConstructor): void => {
-  const prototype = GameClass.prototype as unknown as GamePrototypeRuntime & {
-    [PATCH_MARK]?: boolean;
-  };
-  if (prototype[PATCH_MARK] === true) {
+  const prototype = GameClass.prototype as unknown as GamePrototypeRuntime;
+  const patchState = prototype as unknown as Record<PropertyKey, unknown>;
+  if (patchState[PATCH_MARK] === true) {
     return;
   }
-  prototype[PATCH_MARK] = true;
+  patchState[PATCH_MARK] = true;
 
   const originalTiltStage = prototype.tiltStage;
   const originalGetLocalGravity = prototype.getLocalGravity;
@@ -332,10 +331,11 @@ export const installDirectionalGravity = (GameClass: GameConstructor): void => {
     originalTiltStage.call(this, action);
 
     const runtime = this as unknown as GameRuntime;
-    const targetStageQuaternion = runtime.rotationAnimation?.to;
-    if (targetStageQuaternion === undefined) {
+    const rotationAnimation = runtime.rotationAnimation;
+    if (rotationAnimation === null) {
       return;
     }
+    const targetStageQuaternion = rotationAnimation.to;
 
     const nextGravity = resolveScreenDirectionalGravity(
       action,
@@ -344,7 +344,7 @@ export const installDirectionalGravity = (GameClass: GameConstructor): void => {
       runtime.gravity,
     );
     runtime.pendingScreenGravity = nextGravity;
-    runtime.rotationAnimation.to = chooseReadableTargetQuaternion(
+    rotationAnimation.to = chooseReadableTargetQuaternion(
       targetStageQuaternion,
       nextGravity,
       runtime.camera,
