@@ -2,65 +2,121 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
     <meta name="theme-color" content="#8fd3ff" />
     <meta
       name="description"
-      content="Gravity Grid — a mobile-first low-poly puzzle game built with Three.js."
+      content="Gravity Grid — rotate a low-poly puzzle chamber, change gravity, and turn walls into floors."
     />
     <title>Gravity Grid</title>
   </head>
   <body>
     <main id="app">
-      <canvas id="game-canvas" aria-label="Gravity Grid game"></canvas>
+      <canvas id="game-canvas" aria-label="Gravity Grid 3D puzzle chamber"></canvas>
+      <div class="scene-vignette" aria-hidden="true"></div>
+      <div class="impact-flash" id="impact-flash" aria-hidden="true"></div>
 
-      <section class="hud" aria-live="polite">
-        <div class="brand">
-          <span class="brand__eyebrow">LOW-POLY PUZZLE</span>
-          <strong>GRAVITY GRID</strong>
-        </div>
+      <header class="hud" aria-live="polite">
+        <section class="level-card glass-panel">
+          <span class="eyebrow" id="level-number">CHAMBER 01</span>
+          <strong id="level-name">First Shift</strong>
+          <small id="level-subtitle">Learn to turn walls into floors.</small>
+        </section>
 
-        <div class="stats">
+        <section class="gravity-card glass-panel" aria-label="Current gravity surface">
+          <span class="gravity-card__icon" id="gravity-icon" aria-hidden="true">↓</span>
+          <span>
+            <small>GRAVITY</small>
+            <strong id="gravity-label">FLOOR</strong>
+          </span>
+        </section>
+
+        <section class="stats glass-panel">
           <div class="stat">
-            <span>ENERGY</span>
-            <strong id="crystal-count">0 / 3</strong>
+            <span>SHARDS</span>
+            <strong id="crystal-count">0 / 2</strong>
           </div>
           <div class="stat">
             <span>MOVES</span>
             <strong id="move-count">0</strong>
           </div>
-        </div>
+          <div class="stat stat--desktop">
+            <span>BEST</span>
+            <strong id="best-count">—</strong>
+          </div>
+        </section>
+      </header>
+
+      <nav class="utility-bar" aria-label="Game options">
+        <button class="utility-button" type="button" data-action="undo" aria-label="Undo last move" title="Undo">
+          <span aria-hidden="true">↶</span>
+          <small>UNDO</small>
+        </button>
+        <button class="utility-button" type="button" data-action="sound" aria-label="Toggle sound" title="Sound">
+          <span id="sound-icon" aria-hidden="true">♪</span>
+          <small id="sound-label">SOUND</small>
+        </button>
+        <button class="utility-button" type="button" data-action="reset" aria-label="Restart chamber" title="Restart">
+          <span aria-hidden="true">↻</span>
+          <small>RESTART</small>
+        </button>
+      </nav>
+
+      <section class="hint glass-panel" id="hint" aria-live="polite">
+        Swipe or use the MOVE pad to walk.
       </section>
 
-      <section class="hint" id="hint">
-        Collect every energy crystal, then enter the portal.
+      <section class="gesture-guide" id="gesture-guide" aria-hidden="true">
+        <div><span>☝</span><strong>1 finger</strong><small>MOVE</small></div>
+        <div><span>✌</span><strong>2 fingers</strong><small>SHIFT GRAVITY</small></div>
       </section>
 
-      <section class="controls" aria-label="Game controls">
-        <div class="rotate-controls">
-          <button type="button" data-action="rotate-left" aria-label="Rotate stage left">↶</button>
-          <span>ROTATE</span>
-          <button type="button" data-action="rotate-right" aria-label="Rotate stage right">↷</button>
-        </div>
+      <section class="controls" aria-label="Touch controls">
+        <fieldset class="control-cluster control-cluster--move">
+          <legend>MOVE</legend>
+          <div class="control-pad">
+            <button class="pad-button pad-button--up" type="button" data-action="move-up" aria-label="Move toward top of screen">▲</button>
+            <button class="pad-button pad-button--left" type="button" data-action="move-left" aria-label="Move toward left of screen">◀</button>
+            <div class="pad-core" aria-hidden="true"><span>MOVE</span></div>
+            <button class="pad-button pad-button--right" type="button" data-action="move-right" aria-label="Move toward right of screen">▶</button>
+            <button class="pad-button pad-button--down" type="button" data-action="move-down" aria-label="Move toward bottom of screen">▼</button>
+          </div>
+        </fieldset>
 
-        <div class="dpad">
-          <button type="button" class="dpad__up" data-action="up" aria-label="Move up">▲</button>
-          <button type="button" class="dpad__left" data-action="left" aria-label="Move left">◀</button>
-          <button type="button" class="dpad__down" data-action="down" aria-label="Move down">▼</button>
-          <button type="button" class="dpad__right" data-action="right" aria-label="Move right">▶</button>
-        </div>
-
-        <button type="button" class="reset-button" data-action="reset" aria-label="Restart level">RESTART</button>
+        <fieldset class="control-cluster control-cluster--shift">
+          <legend>SHIFT</legend>
+          <div class="control-pad control-pad--shift">
+            <button class="pad-button pad-button--up" type="button" data-action="tilt-up" aria-label="Shift gravity upward">▲</button>
+            <button class="pad-button pad-button--left" type="button" data-action="tilt-left" aria-label="Shift gravity left">◀</button>
+            <div class="pad-core pad-core--cube" aria-hidden="true"><span>◆</span></div>
+            <button class="pad-button pad-button--right" type="button" data-action="tilt-right" aria-label="Shift gravity right">▶</button>
+            <button class="pad-button pad-button--down" type="button" data-action="tilt-down" aria-label="Shift gravity downward">▼</button>
+          </div>
+        </fieldset>
       </section>
 
       <section class="result-panel" id="result-panel" hidden>
-        <div class="result-card">
-          <span class="result-card__eyebrow">LEVEL COMPLETE</span>
-          <h1>Grid restored!</h1>
-          <p id="result-summary">You reached the portal.</p>
-          <button type="button" data-action="reset">PLAY AGAIN</button>
-        </div>
+        <article class="result-card">
+          <span class="result-card__eyebrow">CHAMBER RESTORED</span>
+          <div class="result-stars" id="result-stars" aria-label="Level rating">★★★</div>
+          <h1 id="result-title">Gravity mastered!</h1>
+          <p id="result-summary">You restored the chamber.</p>
+          <div class="result-stats">
+            <div><span>MOVES</span><strong id="result-moves">0</strong></div>
+            <div><span>PAR</span><strong id="result-par">0</strong></div>
+            <div><span>BEST</span><strong id="result-best">0</strong></div>
+          </div>
+          <div class="result-actions">
+            <button type="button" class="secondary-button" data-action="replay">REPLAY</button>
+            <button type="button" class="primary-button" id="next-button" data-action="next">NEXT CHAMBER</button>
+          </div>
+        </article>
       </section>
+
+      <noscript>Gravity Grid needs JavaScript enabled.</noscript>
     </main>
 
     <script type="module" src="/src/main.ts"></script>
